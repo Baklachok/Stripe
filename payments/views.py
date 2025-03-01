@@ -2,6 +2,7 @@ import stripe
 from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
+from django.views.generic import DetailView
 from rest_framework.views import APIView
 from .models import Item
 
@@ -28,3 +29,13 @@ class CreateCheckoutSessionView(APIView):
         )
 
         return JsonResponse({'session_id': session.id})
+
+class ItemDetailView(DetailView):
+    model = Item
+    template_name = "item_detail.html"
+    context_object_name = "item"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["stripe_public_key"] = settings.STRIPE_PUBLIC_KEY
+        return context

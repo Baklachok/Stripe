@@ -126,3 +126,5 @@ Dockerfile
 
 # Исключение для примера .env
 !.env.example
+
+/staticfiles/
