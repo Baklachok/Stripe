@@ -41,14 +41,7 @@
         }
 
         document.getElementById("buy-button").addEventListener("click", function() {
-            fetch("/buy/{{ item.id }}/", {
-                method: "POST",
-                headers: {
-                    "X-CSRFToken": getCookie("csrftoken"),
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({})
-            })
+            fetch(`/buy/{{ item.id }}/`)
             .then(response => response.json())
             .then(session => {
                 if (session.session_id) {
@@ -75,9 +68,9 @@
         });
 
         document.getElementById("checkout-order").addEventListener("click", function() {
-            let orderItems = JSON.parse(localStorage.getItem("order_items")) || [];
-            if (orderItems.length === 0) {
-                alert("Ваш заказ пуст!");
+            let orderId = localStorage.getItem("order_id"); // Получаем order_id из локального хранилища
+            if (!orderId) {
+                alert("Order ID not found!");
                 return;
             }
 
@@ -87,7 +80,7 @@
                     "X-CSRFToken": getCookie("csrftoken"),
                     "Content-Type": "application/json"
                 },
-                body: JSON.stringify({ items: orderItems })
+                body: JSON.stringify({ order_id: orderId })  // Передаем order_id в теле запроса
             })
             .then(response => response.json())
             .then(session => {

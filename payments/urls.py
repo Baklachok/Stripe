@@ -5,11 +5,11 @@ from .views import (
     AddToOrderView,
     ItemDetailView,
     SuccessView,
-    CancelView, RemoveFromOrderView,
+    CancelView, RemoveFromOrderView,RetrieveCheckoutSessionView,
 )
 
 urlpatterns = [
-    path('buy/<int:item_id>/', CreateCheckoutSessionView.as_view(), name='buy'),
+    path("buy/<int:item_id>/", RetrieveCheckoutSessionView.as_view(), name="buy"),
     path('order/add/', AddToOrderView.as_view(), name='add_to_order'),
     path("order/buy/", CreateOrderCheckoutSessionView.as_view(), name="order_buy"),
     path("order/remove/", RemoveFromOrderView.as_view(), name="remove_from_order"),
