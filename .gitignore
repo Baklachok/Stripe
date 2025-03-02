@@ -117,10 +117,6 @@ dmypy.json
 ### Cython ###
 cython_debug/
 
-### Docker ###
-Dockerfile
-.dockerignore
-
 ### Logs ###
 *.log
 
