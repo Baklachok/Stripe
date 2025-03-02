@@ -9,7 +9,8 @@
 <body>
     <h1>{{ item.name }}</h1>
     <p>{{ item.description }}</p>
-    <p>Цена: ${{ item.price }}</p>
+
+    <p>Цена: {{ item.currency|upper }} {{ item.price }}</p>
 
     <button id="buy-button">Купить</button>
     <button id="add-to-order">Добавить в заказ</button>
@@ -20,12 +21,12 @@
 
         document.getElementById("buy-button").addEventListener("click", function() {
             fetch("/buy/{{ item.id }}/", {
-                method: "POST",  // Измените с GET на POST
+                method: "POST",
                 headers: {
                     "X-CSRFToken": getCookie("csrftoken"),
                     "Content-Type": "application/json"
                 },
-                body: JSON.stringify({}) // передача данных если нужно
+                body: JSON.stringify({})
             })
             .then(response => response.json())
             .then(session => {
@@ -69,16 +70,32 @@
                 return;
             }
 
-            fetch(`/order/${orderId}/buy/`)
-            .then(response => response.json())
+            // Исправленный запрос с POST методом и CSRF-токеном
+            fetch(`/order/${orderId}/buy/`, {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": getCookie("csrftoken"),
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({}) // Пустое тело запроса
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw err; });
+                }
+                return response.json();
+            })
             .then(session => {
                 if (session.session_id) {
                     return stripe.redirectToCheckout({ sessionId: session.session_id });
-                } else {
-                    alert("Ошибка при создании сессии оплаты заказа!");
+                } else if (session.error) {
+                    alert(`Ошибка: ${session.error}`);
                 }
             })
-            .catch(error => console.error("Ошибка:", error));
+            .catch(error => {
+                console.error("Ошибка:", error);
+                alert(error.error || "Произошла ошибка при оплате");
+            });
         });
 
         function getCookie(name) {
