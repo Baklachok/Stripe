@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import stripe
 
@@ -34,23 +34,34 @@ def create_stripe_line_items(items: List[Item]) -> List[Dict]:
     return line_items
 
 
-def create_stripe_checkout_session(order: Order, line_items: List[Dict]) -> Dict:
-    """Создает платежную сессию в Stripe с учетом скидки и налога."""
+def create_stripe_checkout_session(order: Optional[Order], line_items: List[Dict]) -> Dict:
+    """Создает платежную сессию в Stripe для товара или заказа."""
+    if not line_items:
+        raise ValueError("No items provided for checkout session")
+
     try:
-        # Создаем скидку в Stripe, если она есть
+        currency = line_items[0]["price_data"]["currency"]
+
+        stripe_key = settings.STRIPE_SECRET_KEYS.get(currency)
+        if not stripe_key:
+            raise ValueError(f"No Stripe key configured for currency: {currency}")
+
+        stripe.api_key = stripe_key
+
+        # Создаём скидку, если передан заказ
         discounts = []
-        if order.discount:
+        if order and order.discount:
             coupon = stripe.Coupon.create(
                 name=order.discount.name,
-                amount_off=int(order.discount.amount * 100),  # Преобразуем в центы
-                currency="usd",
-                duration="once"  # Разовая скидка
+                amount_off=int(order.discount.amount * 100),
+                currency=currency,
+                duration="once"
             )
             discounts.append({"coupon": coupon.id})
 
-        # Создаем налог в Stripe, если он есть
+        # Создаём налог, если передан заказ
         tax_rates = []
-        if order.tax:
+        if order and order.tax:
             tax = stripe.TaxRate.create(
                 display_name=order.tax.name,
                 percentage=float(order.tax.percentage),
@@ -58,11 +69,9 @@ def create_stripe_checkout_session(order: Order, line_items: List[Dict]) -> Dict
             )
             tax_rates.append(tax.id)
 
-        # Добавляем налог к каждому элементу
         for item in line_items:
-            item["tax_rates"] = tax_rates
+            item["tax_rates"] = tax_rates  # Добавляем налог к каждому товару
 
-        # Создаем сессию оплаты в Stripe
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             line_items=line_items,
@@ -73,5 +82,6 @@ def create_stripe_checkout_session(order: Order, line_items: List[Dict]) -> Dict
         )
         return {"session_id": session.id}
     except stripe.error.StripeError as e:
-        logger.error(f"Stripe error: {str(e)}")
+        logger.error(f"Stripe error: {e}")
         return {"error": str(e)}
+

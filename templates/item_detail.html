@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -21,10 +21,25 @@
     <script type="text/javascript">
         var stripe = Stripe("{{ stripe_public_key }}");
 
+        /** Получение CSRF-токена */
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== "") {
+                document.cookie.split(";").forEach(cookie => {
+                    cookie = cookie.trim();
+                    if (cookie.startsWith(name + "=")) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    }
+                });
+            }
+            return cookieValue;
+        }
+
+        /** Обновление отображения заказа */
         function updateOrderDisplay() {
             let orderItems = JSON.parse(localStorage.getItem("order_items")) || [];
             let orderList = document.getElementById("order-items");
-            orderList.innerHTML = "";  // Очистка списка
+            orderList.innerHTML = "";
 
             if (orderItems.length === 0) {
                 orderList.innerHTML = "<li>Корзина пуста</li>";
@@ -40,6 +55,7 @@
             }
         }
 
+        /** Покупка одного товара */
         document.getElementById("buy-button").addEventListener("click", function() {
             fetch(`/buy/{{ item.id }}/`)
             .then(response => response.json())
@@ -53,24 +69,55 @@
             .catch(error => console.error("Ошибка:", error));
         });
 
+        /** Добавление товара в заказ */
         document.getElementById("add-to-order").addEventListener("click", function() {
             let orderItems = JSON.parse(localStorage.getItem("order_items")) || [];
+            let orderId = localStorage.getItem("order_id");
+
             let newItem = {
                 id: {{ item.id }},
                 name: "{{ item.name }}",
                 price: "{{ item.price }}",
                 currency: "{{ item.currency }}"
             };
-            orderItems.push(newItem);
-            localStorage.setItem("order_items", JSON.stringify(orderItems));
-            updateOrderDisplay();
-            alert("Товар добавлен в заказ!");
+
+            // Проверяем, есть ли уже этот товар в корзине
+            if (orderItems.some(item => item.id === newItem.id)) {
+                alert("Этот товар уже в корзине!");
+                return;
+            }
+
+            let requestBody = orderId ? { order_id: orderId, item_id: {{ item.id }} } : { item_id: {{ item.id }} };
+
+            fetch("/order/add/", {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": getCookie("csrftoken"),
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(requestBody)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.order_id) {
+                    localStorage.setItem("order_id", data.order_id);
+                    orderItems.push(newItem);
+                    localStorage.setItem("order_items", JSON.stringify(orderItems));
+                    updateOrderDisplay();
+                    alert("Товар добавлен в заказ!");
+                } else {
+                    alert(`Ошибка: ${data.error}`);
+                }
+            })
+            .catch(error => console.error("Ошибка:", error));
         });
 
+        /** Оплата заказа */
         document.getElementById("checkout-order").addEventListener("click", function() {
-            let orderId = localStorage.getItem("order_id"); // Получаем order_id из локального хранилища
+            let orderId = localStorage.getItem("order_id");
+
             if (!orderId) {
-                alert("Order ID not found!");
+                alert("Ошибка: заказ не найден!");
                 return;
             }
 
@@ -80,14 +127,15 @@
                     "X-CSRFToken": getCookie("csrftoken"),
                     "Content-Type": "application/json"
                 },
-                body: JSON.stringify({ order_id: orderId })  // Передаем order_id в теле запроса
+                body: JSON.stringify({ order_id: orderId })
             })
             .then(response => response.json())
             .then(session => {
                 if (session.session_id) {
                     localStorage.removeItem("order_items");
+                    localStorage.removeItem("order_id");
                     return stripe.redirectToCheckout({ sessionId: session.session_id });
-                } else if (session.error) {
+                } else {
                     alert(`Ошибка: ${session.error}`);
                 }
             })
@@ -97,29 +145,40 @@
             });
         });
 
+        /** Удаление товара из заказа */
         function removeFromOrder(index) {
             let orderItems = JSON.parse(localStorage.getItem("order_items")) || [];
-            orderItems.splice(index, 1);
-            localStorage.setItem("order_items", JSON.stringify(orderItems));
-            updateOrderDisplay();
-        }
+            let orderId = localStorage.getItem("order_id");
 
-        function getCookie(name) {
-            let cookieValue = null;
-            if (document.cookie && document.cookie !== "") {
-                let cookies = document.cookie.split(";");
-                for (let i = 0; i < cookies.length; i++) {
-                    let cookie = cookies[i].trim();
-                    if (cookie.startsWith(name + "=")) {
-                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                        break;
-                    }
-                }
+            if (!orderId) {
+                alert("Ошибка: заказ не найден!");
+                return;
             }
-            return cookieValue;
+
+            let itemToRemove = orderItems[index];
+
+            fetch("/order/remove/", {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": getCookie("csrftoken"),
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ order_id: orderId, item_id: itemToRemove.id })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message) {
+                    orderItems.splice(index, 1);
+                    localStorage.setItem("order_items", JSON.stringify(orderItems));
+                    updateOrderDisplay();
+                } else {
+                    alert(`Ошибка: ${data.error}`);
+                }
+            })
+            .catch(error => console.error("Ошибка:", error));
         }
 
-        // Обновляем отображение товаров в заказе при загрузке страницы
+        // Обновляем корзину при загрузке страницы
         updateOrderDisplay();
     </script>
 </body>

@@ -16,7 +16,6 @@ from .serilizers import AddToOrderSerializer
 from .services import create_stripe_line_items, create_stripe_checkout_session
 
 logger = logging.getLogger(__name__)
-stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 # ---------- API Views ----------
@@ -30,11 +29,14 @@ class RetrieveCheckoutSessionView(APIView):
 
         try:
             line_items = create_stripe_line_items([item])
-            result = create_stripe_checkout_session(line_items)
+            result = create_stripe_checkout_session(None, line_items)  # order=None, работаем только с line_items
             return Response(result, status=status.HTTP_200_OK)
         except ValueError as e:
+            logger.error(f"ValueError: {e}")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+            return Response({"error": "Something went wrong"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CreateCheckoutSessionView(APIView):
@@ -45,7 +47,8 @@ class CreateCheckoutSessionView(APIView):
 
         try:
             line_items = create_stripe_line_items([item])
-            result = create_stripe_checkout_session(line_items)
+            order = Order.objects.create()  # Создаём временный заказ
+            result = create_stripe_checkout_session(order, line_items)  # Передаём order
             return Response(result, status=status.HTTP_201_CREATED)
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -63,7 +66,13 @@ class AddToOrderView(APIView):
 
         try:
             with transaction.atomic():
-                order = Order.objects.select_for_update().get(id=order_id) if order_id else Order.objects.create()
+                if order_id:
+                    # Если передан order_id, добавляем товар в существующий заказ
+                    order = get_object_or_404(Order, id=order_id)
+                else:
+                    # Если order_id нет, создаем новый заказ
+                    order = Order.objects.create()
+
                 order.items.add(item)
                 order.save()
 
@@ -76,13 +85,14 @@ class AddToOrderView(APIView):
         return Response({"order_id": order.id}, status=status.HTTP_200_OK)
 
 
+
 class CreateOrderCheckoutSessionView(APIView):
     """Создает сессию оплаты для заказа с учетом скидки и налога."""
 
     def post(self, request) -> Response:
         order_id = request.data.get("order_id")
         if not order_id:
-            return Response({"error": "order_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "order_id is required"}, status=status.HTTP_400_BAD_REQUEST)  # Добавлено!
 
         order = get_object_or_404(Order, id=order_id)
 
@@ -119,14 +129,14 @@ class RemoveFromOrderView(APIView):
 
 # ---------- Template Views ----------
 class ItemDetailView(DetailView):
-    """Детальное отображение товара с интеграцией Stripe."""
     model = Item
     template_name = "item_detail.html"
     context_object_name = "item"
 
     def get_context_data(self, **kwargs) -> Dict:
         context = super().get_context_data(**kwargs)
-        context["stripe_public_key"] = settings.STRIPE_PUBLIC_KEY
+        currency = self.object.currency
+        context["stripe_public_key"] = settings.STRIPE_PUBLIC_KEYS.get(currency, "")
         return context
 
 
