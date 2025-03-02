@@ -4,6 +4,7 @@ from typing import Dict, List
 import stripe
 from django.conf import settings
 from django.db import transaction
+from django.shortcuts import get_object_or_404
 from django.views.generic import DetailView, TemplateView
 from rest_framework import serializers, status
 from rest_framework.exceptions import NotFound, ValidationError
@@ -23,20 +24,20 @@ def create_stripe_line_items(items: List[Item]) -> List[Dict]:
         raise ValueError("Items list is empty")
 
     currency = items[0].currency
-    line_items = []
-
-    for item in items:
-        if item.currency != currency:
-            raise ValueError("All items must have the same currency")
-
-        line_items.append({
-            'price_data': {
-                'currency': currency,
-                'product_data': {'name': item.name},
-                'unit_amount': int(item.price * 100),
+    line_items = [
+        {
+            "price_data": {
+                "currency": item.currency,
+                "product_data": {"name": item.name},
+                "unit_amount": int(item.price * 100),
             },
-            'quantity': 1,
-        })
+            "quantity": 1,
+        }
+        for item in items
+    ]
+
+    if any(item.currency != currency for item in items):
+        raise ValueError("All items must have the same currency")
 
     return line_items
 
@@ -45,16 +46,16 @@ def create_stripe_checkout_session(line_items: List[Dict]) -> Dict:
     """Создает платежную сессию в Stripe."""
     try:
         session = stripe.checkout.Session.create(
-            payment_method_types=['card'],
+            payment_method_types=["card"],
             line_items=line_items,
-            mode='payment',
+            mode="payment",
             success_url=settings.STRIPE_SUCCESS_URL,
             cancel_url=settings.STRIPE_CANCEL_URL,
         )
-        return {'session_id': session.id}
+        return {"session_id": session.id}
     except stripe.error.StripeError as e:
         logger.error(f"Stripe error: {str(e)}")
-        return {'error': str(e)}
+        return {"error": str(e)}
 
 
 # ---------- Serializers ----------
@@ -69,19 +70,14 @@ class CreateCheckoutSessionView(APIView):
     """Создает сессию оплаты для одиночного товара."""
 
     def post(self, request, item_id: int) -> Response:
-        try:
-            item = Item.objects.get(id=item_id)
-        except Item.DoesNotExist:
-            raise NotFound(detail="Item not found")
+        item = get_object_or_404(Item, id=item_id)
 
         try:
             line_items = create_stripe_line_items([item])
+            result = create_stripe_checkout_session(line_items)
+            return Response(result, status=status.HTTP_201_CREATED)
         except ValueError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-        result = create_stripe_checkout_session(line_items)
-        return Response(result,
-                        status=status.HTTP_201_CREATED if 'session_id' in result else status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class AddToOrderView(APIView):
@@ -89,61 +85,64 @@ class AddToOrderView(APIView):
 
     def post(self, request) -> Response:
         serializer = AddToOrderSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
 
-        data = serializer.validated_data
-        item_id = data['item_id']
-        order_id = data.get('order_id')
+        item = get_object_or_404(Item, id=serializer.validated_data["item_id"])
+        order_id = serializer.validated_data.get("order_id")
 
-        # Получение товара
-        try:
-            item = Item.objects.get(id=item_id)
-        except Item.DoesNotExist:
-            raise NotFound(detail="Item not found")
-
-        # Работа с заказом
         try:
             with transaction.atomic():
-                if order_id:
-                    order = Order.objects.select_for_update().get(id=order_id)
-                else:
-                    order = Order.objects.create()
-
+                order = Order.objects.select_for_update().get(id=order_id) if order_id else Order.objects.create()
                 order.items.add(item)
                 order.save()
 
         except Order.DoesNotExist:
-            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             logger.error(f"Order error: {str(e)}")
-            return Response({'error': 'Invalid request'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Invalid request"}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({'order_id': order.id}, status=status.HTTP_200_OK)
+        return Response({"order_id": order.id}, status=status.HTTP_200_OK)
 
 
 class CreateOrderCheckoutSessionView(APIView):
-    """Создает сессию оплаты для заказа."""
+    """Создает сессию оплаты для нескольких товаров."""
 
-    def post(self, request, order_id: str) -> Response:
-        try:
-            order = Order.objects.prefetch_related('items').get(id=order_id)
-        except Order.DoesNotExist:
-            raise NotFound(detail="Order not found")
-        except (ValueError, ValidationError):
-            return Response({'error': 'Invalid order ID'}, status=status.HTTP_400_BAD_REQUEST)
+    def post(self, request) -> Response:
+        items_data = request.data.get("items", [])
+        if not items_data:
+            return Response({"error": "Order is empty"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not order.items.exists():
-            return Response({'error': 'Order is empty'}, status=status.HTTP_400_BAD_REQUEST)
+        items = Item.objects.filter(id__in=[item["id"] for item in items_data])
+        if len(items) != len(items_data):
+            return Response({"error": "One or more items not found"}, status=status.HTTP_404_NOT_FOUND)
 
         try:
-            line_items = create_stripe_line_items(order.items.all())
+            line_items = create_stripe_line_items(items)
+            result = create_stripe_checkout_session(line_items)
+            return Response(result, status=status.HTTP_201_CREATED)
         except ValueError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        result = create_stripe_checkout_session(line_items)
-        return Response(result,
-                        status=status.HTTP_201_CREATED if 'session_id' in result else status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class RemoveFromOrderView(APIView):
+    """Удаляет товар из заказа."""
+
+    def post(self, request) -> Response:
+        order_id = request.data.get("order_id")
+        item_id = request.data.get("item_id")
+
+        if not order_id or not item_id:
+            return Response({"error": "order_id and item_id are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        order = get_object_or_404(Order, id=order_id)
+        item = get_object_or_404(Item, id=item_id)
+
+        if item in order.items.all():
+            order.items.remove(item)
+            order.save()
+            return Response({"message": "Item removed from order"}, status=status.HTTP_200_OK)
+        return Response({"error": "Item not in order"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ---------- Template Views ----------

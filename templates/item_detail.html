@@ -9,15 +9,36 @@
 <body>
     <h1>{{ item.name }}</h1>
     <p>{{ item.description }}</p>
-
     <p>Цена: {{ item.currency|upper }} {{ item.price }}</p>
 
     <button id="buy-button">Купить</button>
     <button id="add-to-order">Добавить в заказ</button>
     <button id="checkout-order" style="display: none;">Оплатить заказ</button>
 
+    <h2>🛒 Товары в заказе</h2>
+    <ul id="order-items"></ul>
+
     <script type="text/javascript">
         var stripe = Stripe("{{ stripe_public_key }}");
+
+        function updateOrderDisplay() {
+            let orderItems = JSON.parse(localStorage.getItem("order_items")) || [];
+            let orderList = document.getElementById("order-items");
+            orderList.innerHTML = "";  // Очистка списка
+
+            if (orderItems.length === 0) {
+                orderList.innerHTML = "<li>Корзина пуста</li>";
+                document.getElementById("checkout-order").style.display = "none";
+            } else {
+                orderItems.forEach((item, index) => {
+                    let li = document.createElement("li");
+                    li.innerHTML = `${item.name} - ${item.currency.toUpperCase()} ${item.price}
+                                    <button onclick="removeFromOrder(${index})">❌</button>`;
+                    orderList.appendChild(li);
+                });
+                document.getElementById("checkout-order").style.display = "block";
+            }
+        }
 
         document.getElementById("buy-button").addEventListener("click", function() {
             fetch("/buy/{{ item.id }}/", {
@@ -40,53 +61,38 @@
         });
 
         document.getElementById("add-to-order").addEventListener("click", function() {
-            let orderId = localStorage.getItem("order_id");
-
-            fetch("/order/add/", {
-                method: "POST",
-                headers: {
-                    "X-CSRFToken": getCookie("csrftoken"),
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({ item_id: {{ item.id }}, order_id: orderId })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.order_id) {
-                    localStorage.setItem("order_id", data.order_id);
-                    document.getElementById("checkout-order").style.display = "block";
-                    alert("Товар добавлен в заказ!");
-                } else {
-                    alert("Ошибка при добавлении товара!");
-                }
-            })
-            .catch(error => console.error("Ошибка:", error));
+            let orderItems = JSON.parse(localStorage.getItem("order_items")) || [];
+            let newItem = {
+                id: {{ item.id }},
+                name: "{{ item.name }}",
+                price: "{{ item.price }}",
+                currency: "{{ item.currency }}"
+            };
+            orderItems.push(newItem);
+            localStorage.setItem("order_items", JSON.stringify(orderItems));
+            updateOrderDisplay();
+            alert("Товар добавлен в заказ!");
         });
 
         document.getElementById("checkout-order").addEventListener("click", function() {
-            let orderId = localStorage.getItem("order_id");
-            if (!orderId) {
+            let orderItems = JSON.parse(localStorage.getItem("order_items")) || [];
+            if (orderItems.length === 0) {
                 alert("Ваш заказ пуст!");
                 return;
             }
 
-            // Исправленный запрос с POST методом и CSRF-токеном
-            fetch(`/order/${orderId}/buy/`, {
+            fetch("/order/buy/", {
                 method: "POST",
                 headers: {
                     "X-CSRFToken": getCookie("csrftoken"),
                     "Content-Type": "application/json"
                 },
-                body: JSON.stringify({}) // Пустое тело запроса
+                body: JSON.stringify({ items: orderItems })
             })
-            .then(response => {
-                if (!response.ok) {
-                    return response.json().then(err => { throw err; });
-                }
-                return response.json();
-            })
+            .then(response => response.json())
             .then(session => {
                 if (session.session_id) {
+                    localStorage.removeItem("order_items");
                     return stripe.redirectToCheckout({ sessionId: session.session_id });
                 } else if (session.error) {
                     alert(`Ошибка: ${session.error}`);
@@ -97,6 +103,13 @@
                 alert(error.error || "Произошла ошибка при оплате");
             });
         });
+
+        function removeFromOrder(index) {
+            let orderItems = JSON.parse(localStorage.getItem("order_items")) || [];
+            orderItems.splice(index, 1);
+            localStorage.setItem("order_items", JSON.stringify(orderItems));
+            updateOrderDisplay();
+        }
 
         function getCookie(name) {
             let cookieValue = null;
@@ -112,6 +125,9 @@
             }
             return cookieValue;
         }
+
+        // Обновляем отображение товаров в заказе при загрузке страницы
+        updateOrderDisplay();
     </script>
 </body>
 </html>
