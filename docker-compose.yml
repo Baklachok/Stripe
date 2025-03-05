@@ -10,13 +10,13 @@ services:
       - db
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app
     command: >
       sh -c "python manage.py migrate &&
-             python manage.py createsuperuser --noinput || true &&
-             python manage.py collectstatic --noinput &&
-             python manage.py runserver 0.0.0.0:8000"
+            python /app/scripts/create_superuser.py &&
+            python manage.py collectstatic --noinput &&
+            gunicorn --bind 0.0.0.0:8000 stripe_project.wsgi:application"
+    volumes:
+      - ./staticfiles:/app/staticfiles
 
   db:
     image: postgres:15
