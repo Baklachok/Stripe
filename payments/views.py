@@ -29,7 +29,7 @@ class RetrieveCheckoutSessionView(APIView):
 
         try:
             line_items = create_stripe_line_items([item])
-            result = create_stripe_checkout_session(None, line_items)  # order=None, работаем только с line_items
+            result = create_stripe_checkout_session(request,None, line_items)  # order=None, работаем только с line_items
             return Response(result, status=status.HTTP_200_OK)
         except ValueError as e:
             logger.error(f"ValueError: {e}")
@@ -48,7 +48,7 @@ class CreateCheckoutSessionView(APIView):
         try:
             line_items = create_stripe_line_items([item])
             order = Order.objects.create()  # Создаём временный заказ
-            result = create_stripe_checkout_session(order, line_items)  # Передаём order
+            result = create_stripe_checkout_session(request, None, line_items)
             return Response(result, status=status.HTTP_201_CREATED)
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -101,7 +101,7 @@ class CreateOrderCheckoutSessionView(APIView):
 
         try:
             line_items = create_stripe_line_items(order.items.all())
-            result = create_stripe_checkout_session(order, line_items)
+            result = create_stripe_checkout_session(request, order, line_items)
             return Response(result, status=status.HTTP_201_CREATED)
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

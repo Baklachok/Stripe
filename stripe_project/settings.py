@@ -101,6 +101,3 @@ STRIPE_PUBLIC_KEYS = {
     "usd": os.getenv("STRIPE_PUBLIC_KEY_USD"),
     "eur": os.getenv("STRIPE_PUBLIC_KEY_EUR"),
 }
-
-STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL", "http://localhost:8000/success/")
-STRIPE_CANCEL_URL = os.getenv("STRIPE_CANCEL_URL", "http://localhost:8000/cancel/")

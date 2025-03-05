@@ -2,6 +2,8 @@ import logging
 from typing import List, Dict, Optional
 
 import stripe
+from django.http import HttpRequest
+from django.urls import reverse
 
 from payments.models import Item, Order
 from stripe_project import settings
@@ -34,7 +36,7 @@ def create_stripe_line_items(items: List[Item]) -> List[Dict]:
     return line_items
 
 
-def create_stripe_checkout_session(order: Optional[Order], line_items: List[Dict]) -> Dict:
+def create_stripe_checkout_session(request: HttpRequest, order: Optional[Order], line_items: List[Dict]) -> Dict:
     """Создает платежную сессию в Stripe для товара или заказа."""
     if not line_items:
         raise ValueError("No items provided for checkout session")
@@ -72,12 +74,15 @@ def create_stripe_checkout_session(order: Optional[Order], line_items: List[Dict
         for item in line_items:
             item["tax_rates"] = tax_rates  # Добавляем налог к каждому товару
 
+        success_url = request.build_absolute_uri(reverse("success"))
+        cancel_url = request.build_absolute_uri(reverse("cancel"))
+
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             line_items=line_items,
             mode="payment",
-            success_url=settings.STRIPE_SUCCESS_URL,
-            cancel_url=settings.STRIPE_CANCEL_URL,
+            success_url=success_url,
+            cancel_url=cancel_url,
             discounts=discounts
         )
         return {"session_id": session.id}

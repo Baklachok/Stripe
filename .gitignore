@@ -121,7 +121,7 @@ cython_debug/
 *.log
 
 # Исключение для примера .env
-!.env.example
+!.env.template
 
 /staticfiles/
 
